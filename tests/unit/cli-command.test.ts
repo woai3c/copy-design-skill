@@ -29,7 +29,9 @@ describe('CLI command contract', () => {
       url: 'https://example.test/catalog',
       options: {
         format: 'design.md',
-        output: '.',
+        output: undefined,
+        overwrite: false,
+        deprecatedPdf: false,
         viewports: ['desktop', 'tablet', 'mobile'],
         useSession: false,
         darkMode: false,

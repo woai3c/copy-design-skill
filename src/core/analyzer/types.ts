@@ -21,6 +21,8 @@ export interface AnalysisOptions {
   depth?: 'standard' | 'deep'
   pageDiscovery?: PageDiscoveryMode
   dataDir: string
+  /** Optional persistent session root; captures still belong to dataDir. */
+  sessionDataDir?: string
   browserResourcesDir?: string
   browserPath?: string
   proxyServer?: string

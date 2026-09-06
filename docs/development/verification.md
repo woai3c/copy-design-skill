@@ -35,18 +35,24 @@ All commands below are available paths, not claims that they ran for the current
   These suites create isolated directories under the OS temporary directory and retain their captures after closing the
   fixture servers. Record the directories created by the run; clean up only identified task-created artifacts when done.
 - **CLI and MCP:** after `pnpm build:cli`, run
-  `node --test --test-concurrency=1 tests/e2e/cli-reliability.test.mjs tests/e2e/mcp-stdio.test.mjs` for real process/protocol
+  `node --test --test-concurrency=1 tests/e2e/cli-reliability.test.mjs tests/e2e/mcp-stdio.test.mjs tests/e2e/cli-mcp-output.test.mjs` for real process/protocol
   and loopback extraction checks. A cheaper protocol-only check is
   `node --test --test-name-pattern='official MCP client initializes' tests/e2e/mcp-stdio.test.mjs`.
   Inspect stdout/stderr, exit codes, returned schema/tool names, and generated artifact content. Browser-dependent CLI
   cases may skip when no browser is found; a green process exit then does not establish extraction readiness. These are
   source-build entrypoints, not evidence of installed `imprint` / `imprint-mcp` bin distribution.
-  Extraction uses [the default data directory](../../src/core/data-dir.ts), the current user's `.imprint`, and writes
-  captures under `.imprint/screenshots`. `--no-session` / `useSession: false` disables session reuse, not output writes or
-  storage isolation; these tests do not clean those captures. When those writes are unsuitable, use the protocol-only
-  check above and report extraction `NOT EXECUTED`, or let the maintainer select a disposable test environment for the
-  full extraction check. Identify any artifacts created by the run before cleaning them; never clear the user's
-  `.imprint` directory as a test reset.
+  CLI/MCP extraction now returns selected content by default and uses a request-owned temporary workspace; completed,
+  failed, and gracefully cancelled calls must remove it before successful delivery. Explicit `--output` / `outputDir`
+  saves artifacts; explicit session reuse can still read/update [persistent session data](../../src/core/data-dir.ts).
+  MCP URL comparison retains its existing persistent storage behavior. Desktop storage is unchanged.
+  The extraction process tests use [isolated homes, working directories and temp roots](../../tests/e2e/helpers/extraction-harness.mjs).
+  They verify filesystem inventories before teardown, including an absent or sentinel-seeded `.imprint`; teardown alone
+  is not evidence of product cleanup. The output suite checks every format, inline/saved combinations, aliases, invalid
+  parameters, overwrite, portable captures, and cancellation using neutral loopback pages and the official MCP client.
+  Windows `child.kill('SIGINT')` force termination is not evidence of handled cancellation: that legacy process case is
+  explicitly skipped on Windows, while shared cancellation and real MCP cancellation/closure are checked separately.
+  Report missing OS-signal coverage. Tests intentionally save selected artifacts in owned temporary directories, then
+  remove those test directories. Never clear the real user's `.imprint` as a test reset.
 - **Desktop renderer/IPC/lifecycle:** build with `pnpm build`, build the shared source with `pnpm build:cli`, then prepare
   the native test dependency with `pnpm exec electron-rebuild --force --only better-sqlite3`. Run a relevant file such as
   `node --test --test-concurrency=1 tests/e2e/platform-theme.test.mjs` or `tests/e2e/core-flow.test.mjs`.
@@ -71,6 +77,44 @@ Each runtime result records candidate plus dirty state, build/start state, OS/br
 initial/reset state, exact actions and observable predicates, stdout/stderr or UI/file/database evidence, and exclusions.
 Use state-based assertions. Captured screenshots support website evidence and UI verification; they are not Imprint
 analysis inputs. Passing an analyzer's internal consistency tests alone cannot establish correct semantic interpretation.
+
+## CLI/MCP output contract checks
+
+Start with the shared request/delivery checks before building and running the process suite above:
+
+```sh
+pnpm exec vitest run tests/unit/cli-command.test.ts tests/unit/analysis-artifacts.test.ts tests/unit/extraction-delivery.test.ts
+```
+
+The unit tests cover matching defaults, aliases, legacy payloads, selected artifacts, managed-session opt-in, ownership
+and cleanup, and injected partial-write/copy failures. Windows uses dangling junctions for the link regression; POSIX
+uses file symlinks. The process suite checks the ten formats through both entrypoints using neutral local pages. It
+parses DESIGN.md front matter and runs the existing Markdown linter, parses CSS/Tailwind and JSON, and checks SCSS/HTML
+structure and independently specified fixture properties. This validates the existing exports, not a new formal DTCG
+certification or PDF renderer. The `all` envelope and saved manifests are checked separately from artifact contents.
+
+For human acceptance, build the CLI/MCP entrypoints, then start the existing local fixture in a separate terminal:
+
+```sh
+pnpm run test:comparison-site -- --variant reference
+```
+
+From the repository root, directly consume Markdown and CSS, inspect the JSON collection, and explicitly save to a new
+task-owned directory:
+
+```sh
+node dist/cli/index.js http://127.0.0.1:4173/
+node dist/cli/index.js http://127.0.0.1:4173/ --format css
+node dist/cli/index.js http://127.0.0.1:4173/ --format all
+node dist/cli/index.js http://127.0.0.1:4173/ --output ./tmp/cli-mcp-acceptance
+```
+
+Configure a real MCP host using the [README source-build settings](../../README.md#cli-and-mcp). Call `imprint_extract`
+with only `{"url":"http://127.0.0.1:4173/"}`, then with `"format":"css"`, and then with a new absolute `outputDir`.
+Verify the first text block, manifest paths, existing-file errors and explicit overwrite. Record host/version, returned
+results and the maintainer's acceptance decision. Terminal display alone does not establish absence of writes; use the
+isolated filesystem assertions above. Shell redirection and explicit save examples intentionally create files.
+No local plan document is required to run these checks.
 
 ## E2E placement and release
 

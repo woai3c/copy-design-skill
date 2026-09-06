@@ -497,6 +497,7 @@ export async function analyze(
   const analysisId = randomUUID()
   const viewportNames = request.viewports
   const pageLimit = request.maxPages
+  const sessionDataDir = options.sessionDataDir || options.dataDir
   const screenshotDir = path.join(options.dataDir, 'screenshots')
   if (!fs.existsSync(screenshotDir)) {
     fs.mkdirSync(screenshotDir, { recursive: true })
@@ -533,10 +534,10 @@ export async function analyze(
 
   try {
     const initialExecutablePath =
-      accessMode === 'managed' && !hasManagedStorageState(options.dataDir, url)
+      accessMode === 'managed' && !hasManagedStorageState(sessionDataDir, url)
         ? interactiveExecutablePath
         : headlessExecutablePath
-    runtime = await launchRuntime(initialExecutablePath, accessMode, options.dataDir, url, true, options.proxyServer)
+    runtime = await launchRuntime(initialExecutablePath, accessMode, sessionDataDir, url, true, options.proxyServer)
     throwIfAnalysisAborted(analysisSignal)
     initialPage = runtime.context.pages()[0] || (await runtime.context.newPage())
     await configurePageViewport(initialPage, viewportNames[0], initialViewport)
@@ -547,7 +548,7 @@ export async function analyze(
     authWallDetected = authDetection.detected
     finalUrl = authDetection.finalUrl
 
-    if (authMode === 'auto' && hasManagedProfile(options.dataDir, url)) {
+    if (authMode === 'auto' && hasManagedProfile(sessionDataDir, url)) {
       const visitorRuntime = runtime
       const visitorPage = initialPage
       const visitorDetection = authDetection
@@ -555,13 +556,13 @@ export async function analyze(
 
       reportProgress('progress.preparingAuthenticatedAnalysis', 8)
       try {
-        const managedExecutablePath = hasManagedStorageState(options.dataDir, url)
+        const managedExecutablePath = hasManagedStorageState(sessionDataDir, url)
           ? headlessExecutablePath
           : interactiveExecutablePath
         managedRuntime = await launchRuntime(
           managedExecutablePath,
           'managed',
-          options.dataDir,
+          sessionDataDir,
           url,
           true,
           options.proxyServer,
@@ -613,7 +614,7 @@ export async function analyze(
       runtime = await launchRuntime(
         interactiveExecutablePath,
         'managed',
-        options.dataDir,
+        sessionDataDir,
         url,
         false,
         options.proxyServer,
@@ -668,7 +669,7 @@ export async function analyze(
         runtime = await launchRuntime(
           headlessExecutablePath,
           'anonymous',
-          options.dataDir,
+          sessionDataDir,
           url,
           true,
           options.proxyServer,
@@ -693,7 +694,7 @@ export async function analyze(
         responseStatus,
         authDetection,
         headlessExecutablePath,
-        options.dataDir,
+        sessionDataDir,
         url,
         viewportNames[0],
         initialViewport,
@@ -706,7 +707,7 @@ export async function analyze(
       authDetection = switchedRuntime.detection
       finalUrl = authDetection.finalUrl
     }
-    if (accessMode === 'managed' && !authDetection.detected) markManagedSession(options.dataDir, url)
+    if (accessMode === 'managed' && !authDetection.detected) markManagedSession(sessionDataDir, url)
     const browserEnvironment = await readRuntimeBrowserEnvironment(runtime.context)
     timing.browserMs = runState.activeElapsedMs
 
@@ -1808,7 +1809,7 @@ export async function analyze(
     reportProgress('progress.done', 100)
 
     if (accessMode === 'managed') {
-      await saveManagedStorageState(runtime.context, options.dataDir, url).catch(() => {})
+      await saveManagedStorageState(runtime.context, sessionDataDir, url).catch(() => {})
     }
     throwIfAnalysisAborted(analysisSignal)
 

@@ -12,7 +12,6 @@
  */
 import * as readline from 'node:readline'
 
-import { buildAnalysisArtifacts } from '../core/analysis-artifacts.js'
 import { compareDesigns } from '../core/analyzer/design-compare.js'
 import { NoUsableCapturesError, analyze } from '../core/analyzer/index.js'
 import {
@@ -25,6 +24,8 @@ import { createDeterministicDesignContext } from '../core/design-context/determi
 import { compareDesignProfiles } from '../core/design-context/profile-compare.js'
 import { isCurrentDesignProfile } from '../core/design-context/types.js'
 import type { DesignProfile } from '../core/design-context/types.js'
+import { runExtraction } from '../core/extraction-delivery.js'
+import { EXTRACTION_FORMAT_NAMES, createExtractionRequest } from '../core/extraction-request.js'
 import { coreT, coreTranslator } from '../core/i18n/index.js'
 
 interface JsonRpcRequest {
@@ -62,32 +63,35 @@ class ProtocolError extends Error {
 const TOOLS = [
   {
     name: 'imprint_extract',
-    description: 'Extract design system tokens from a website URL. Returns colors, typography, spacing, and more.',
+    description: mcpT('extract.description'),
     inputSchema: {
       type: 'object',
+      additionalProperties: false,
       properties: {
-        url: { type: 'string', description: 'The URL to analyze' },
+        url: { type: 'string', description: mcpT('extract.url') },
         format: {
           type: 'string',
-          enum: ['tokens', 'json', 'evidence', 'component-specs', 'visual-qa', 'css', 'tailwind', 'markdown', 'all'],
-          description: 'Output format (default: markdown / DESIGN.md)',
+          enum: EXTRACTION_FORMAT_NAMES,
+          default: 'design.md',
+          description: mcpT('extract.format'),
         },
+        outputDir: { type: 'string', description: mcpT('extract.outputDir') },
+        overwrite: { type: 'boolean', default: false, description: mcpT('extract.overwrite') },
         viewport: {
           type: 'string',
-          enum: ['desktop', 'tablet', 'mobile'],
-          description: 'Viewport size (default: desktop)',
+          enum: ['desktop', 'tablet', 'mobile', 'all'],
+          default: 'desktop',
+          description: mcpT('extract.viewport'),
         },
-        useSession: { type: 'boolean', description: "Reuse Imprint's saved browser session (default: true)" },
-        maxPages: {
-          type: 'integer',
-          minimum: 1,
-          maximum: 20,
-          description: 'Page limit from 1 to 20 (default: 8)',
-        },
+        useSession: { type: 'boolean', default: false, description: mcpT('extract.useSession') },
+        darkMode: { type: 'boolean', default: false, description: mcpT('extract.darkMode') },
+        browserPath: { type: 'string', description: mcpT('extract.browserPath') },
+        maxPages: { type: 'integer', minimum: 1, maximum: 20, default: 8, description: mcpT('extract.maxPages') },
         discovery: {
           type: 'string',
           enum: ['auto', 'links', 'sitemap'],
-          description: 'Sub-page discovery strategy (default: auto)',
+          default: 'auto',
+          description: mcpT('extract.discovery'),
         },
       },
       required: ['url'],
@@ -111,87 +115,13 @@ const TOOLS = [
 ]
 
 async function handleToolCall(name: string, params: Record<string, unknown>, signal?: AbortSignal): Promise<unknown> {
-  const dataDir = getDefaultDataDir()
-
   if (name === 'imprint_extract') {
-    const url = params.url as string
-    const format = (params.format as string) || 'markdown'
-    const viewport = (params.viewport as string) || 'desktop'
-    const useSession = params.useSession !== false
-    const maxPages = params.maxPages === undefined ? undefined : Number(params.maxPages)
-    const pageDiscovery = ['links', 'sitemap'].includes(String(params.discovery))
-      ? (String(params.discovery) as 'links' | 'sitemap')
-      : 'auto'
-
-    const result = await analyze(url, {
-      viewports: [viewport],
-      useSession,
-      extractDarkMode: true,
-      dataDir,
-      ...(maxPages === undefined ? {} : { maxPages }),
-      pageDiscovery,
+    const request = createExtractionRequest(params, 'mcp')
+    const delivery = await runExtraction(request, {
       signal,
+      onDiagnostic: (message) => process.stderr.write(message + '\n'),
     })
-
-    const artifacts = buildAnalysisArtifacts(result, { sourceUrl: url, language: 'en' })
-    const tokenSummary = {
-      tokens: artifacts.tokens,
-      darkMode: artifacts.darkMode,
-      featureTags: result.featureTags,
-      pageCoverage: artifacts.pageCoverage,
-      completion: result.completion,
-      extractionIssues: artifacts.extractionIssues,
-      analysisTiming: result.timing,
-    }
-
-    switch (format) {
-      case 'json':
-        return { content: [{ type: 'text', text: artifacts.dtcgJson }] }
-      case 'css':
-        return { content: [{ type: 'text', text: artifacts.cssVariables }] }
-      case 'tailwind':
-        return { content: [{ type: 'text', text: artifacts.tailwindTheme }] }
-      case 'markdown':
-        return { content: [{ type: 'text', text: artifacts.designDoc }] }
-      case 'evidence':
-        return { content: [{ type: 'text', text: artifacts.evidenceJson }] }
-      case 'component-specs':
-        return { content: [{ type: 'text', text: artifacts.componentSpecsJson }] }
-      case 'visual-qa':
-        return { content: [{ type: 'text', text: artifacts.visualQaJson }] }
-      case 'all':
-        return {
-          content: [
-            {
-              type: 'text',
-              text: JSON.stringify(
-                {
-                  ...tokenSummary,
-                  designProfile: artifacts.designContext.profile,
-                  agentContext: artifacts.designContext.agentContext,
-                  validationReport: artifacts.designContext.validationReport,
-                  css: artifacts.cssVariables,
-                  tailwind: artifacts.tailwindTheme,
-                  evidence: artifacts.evidence,
-                  markdown: artifacts.designDoc,
-                  dtcg: artifacts.dtcgJson,
-                },
-                null,
-                2,
-              ),
-            },
-          ],
-        }
-      default:
-        return {
-          content: [
-            {
-              type: 'text',
-              text: JSON.stringify(tokenSummary, null, 2),
-            },
-          ],
-        }
-    }
+    return { content: [{ type: 'text', text: delivery.text }], structuredContent: delivery.structuredContent }
   }
 
   if (name === 'imprint_compare') {
@@ -205,6 +135,7 @@ async function handleToolCall(name: string, params: Record<string, unknown>, sig
         content: [{ type: 'text', text: JSON.stringify(compareDesignProfiles(profileA, profileB), null, 2) }],
       }
     }
+    const dataDir = getDefaultDataDir()
     const urlA = params.urlA as string
     const urlB = params.urlB as string
 

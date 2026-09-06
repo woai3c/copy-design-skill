@@ -38,7 +38,8 @@
       "invalidBrowserPath": "--browser-path 不是可访问的可执行文件：{{path}}",
       "cancelled": "分析已取消。",
       "noUsableCaptures": "未能捕获可用的页面内容。网站可能暂时不可用、阻止了访问或仍在加载。",
-      "runtime": "分析失败：{{message}}"
+      "runtime": "分析失败：{{message}}",
+      "conflictingOptions": "参数冲突或重复：{{value}}"
     },
     "completion": {
       "userFinished": "已使用当前结果结束，并保留 {{pages}} 个已完成页面。"
@@ -59,8 +60,12 @@
     },
     "usage": {
       "doctor": "imprint doctor [--browser-path <路径>] [--json]",
-      "browserPath": "--browser-path <路径>  使用指定的 Chrome、Edge 或 Chromium 可执行文件"
-    }
+      "browserPath": "--browser-path <路径>  使用指定的 Chrome、Edge 或 Chromium 可执行文件",
+      "full": "Imprint - 提取网站设计系统\n\n用法：\n  imprint <url> [选项]\n  imprint extract <url> [选项]\n  imprint doctor [--browser-path <路径>] [--json]\n\n只有 URL 必填。默认在 stdout 返回完整 DESIGN.md 正文，不保留产物、截图或会话文件。\n成功、失败或正常处理取消后，清理浏览器临时数据。日志写入 stderr。\n\n选项：\n  --format <类型>      design.md | css | tailwind | json | scss | evidence | profile | components | visual-qa | html | all\n                       默认 design.md。all 在不传 --output 时返回一个 JSON 产物集合。\n                       别名：markdown、component-specs、pdf（已弃用，输出可打印 HTML）。\n  --output <目录>      将所选产物保存到此目录；省略时直接返回正文。保存模式的 stdout 为空。\n  --overwrite          覆盖选中的已有普通文件；必须提供 --output。\n  --viewport <尺寸>    desktop | tablet | mobile | all（默认 desktop）\n  --dark-mode          同时观察暗色模式（默认关闭）\n  --pages <数量>       1-20 的整数（默认 8）\n  --discovery <模式>   auto | links | sitemap（默认 auto）\n  --browser-path <路径> 指定 Chrome、Edge 或 Chromium 可执行文件\n  --use-session        显式复用持久会话；可能读取或更新浏览器配置和存储状态\n  --no-session         匿名临时会话（默认）；与 --use-session 冲突\n  --json-stdout        旧版内部 Token，非 DTCG；只能直接返回，可搭配旧版 --format json 用法\n  --quiet              隐藏普通进度；仍显示错误和重要诊断\n\n示例：\n  imprint https://example.com\n  imprint https://example.com --format css\n  imprint https://example.com --format json\n  imprint https://example.com --format all --output ./design\n"
+    },
+    "analyzing": "正在分析 {{url}}",
+    "saved": "已保存 {{path}}",
+    "done": "已完成。"
   },
   "mcp": {
     "started": "Imprint MCP 服务器已启动（stdio 模式）",
@@ -77,6 +82,19 @@
       "noUsableCaptures": "未能捕获可用的页面内容。网站可能暂时不可用、阻止了访问或仍在加载。",
       "toolExecution": "工具执行失败：{{message}}",
       "internal": "服务器内部错误"
+    },
+    "extract": {
+      "description": "提取网站设计系统。只传 URL 时返回完整 DESIGN.md 正文，不保留文件。显式提供 outputDir 时保存所选产物。",
+      "url": "待分析的 HTTP(S) URL；唯一必填参数。",
+      "format": "产物格式，默认 design.md。json 为 DTCG；tokens 为只能直接返回的旧版摘要；pdf 是已弃用的 HTML 别名。all 在未指定目录时返回一个 JSON 产物集合。",
+      "outputDir": "可选，本服务器上的绝对目录路径。省略时直接返回内容，不保存文件。",
+      "overwrite": "覆盖选中的已有普通文件；必须提供 outputDir。",
+      "viewport": "视口：desktop、tablet、mobile 或 all；默认 desktop。",
+      "useSession": "显式复用托管会话（默认 false）。可能读取或更新持久浏览器配置和存储状态。",
+      "darkMode": "同时观察暗色模式；默认 false。",
+      "browserPath": "可选，Chrome、Edge 或 Chromium 可执行文件路径。",
+      "maxPages": "页面数量上限，1 到 20 的整数；默认 8。",
+      "discovery": "页面发现方式：auto、links 或 sitemap；默认 auto。"
     }
   },
   "agentGuide": {
@@ -1222,5 +1240,26 @@
       "mobilePartialNeeded": "未捕获的移动端视口及跨页一致性",
       "mobileObservedNeeded": "其他页面的移动端结构及跨页一致性"
     }
+  },
+  "extraction": {
+    "errors": {
+      "invalid-url": "请提供且仅提供一个有效的 HTTP(S) URL。",
+      "invalid-format": "不支持的导出格式：{{value}}",
+      "unknown-parameter": "未知的提取参数：{{value}}",
+      "invalid-parameter": "无效的提取参数：{{value}}",
+      "invalid-viewports": "视口必须为 desktop、tablet、mobile 或 all：{{value}}",
+      "invalid-page-count": "--pages / maxPages 必须是 1 到 20 的整数。",
+      "invalid-page-discovery": "页面发现方式必须为 auto、links 或 sitemap：{{value}}",
+      "invalid-output": "输出位置必须是非空目录路径：{{value}}",
+      "absolute-output": "MCP outputDir 必须是服务器本机的绝对目录路径。",
+      "overwrite-output": "覆盖文件需要显式指定输出目录。",
+      "legacy-output": "旧版 tokens / --json-stdout 只能直接返回。保存 DTCG Token 请使用 json 格式。",
+      "legacy-format": "--json-stdout 仅接受不指定格式或旧版 --format json 组合。",
+      "output-conflict": "输出已存在或无法替换：{{value}}。覆盖选项仅适用于已有的普通文件。",
+      "write-failed": "导出失败：{{value}}。以下文件可能已写入，且可能不完整：{{files}}",
+      "cleanup-failed": "临时数据清理失败；残留工作目录：{{value}}"
+    },
+    "pdf-alias": "已弃用的 pdf 格式导出可打印 HTML（style-guide.html），不会生成 PDF 文件。",
+    "session-persistence": "显式复用会话可能读取或更新 Imprint 持久浏览器配置和存储状态。"
   }
 }

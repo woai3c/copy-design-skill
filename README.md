@@ -178,38 +178,100 @@ the completed artifacts through files or MCP, but they never participate in extr
 pnpm build:cli
 node dist/cli/index.js doctor
 node dist/cli/index.js doctor --browser-path "/path/to/chrome" --json
-node dist/cli/index.js extract https://example.com --pages 8
-node dist/cli/index.js extract https://example.com --format css
-node dist/cli/index.js extract https://example.com --format tailwind
-node dist/cli/index.js extract https://example.com --format json
+node dist/cli/index.js https://example.com
+node dist/cli/index.js https://example.com --format css
+node dist/cli/index.js https://example.com --format tailwind
+node dist/cli/index.js https://example.com --format json
+node dist/cli/index.js https://example.com --format all
+node dist/cli/index.js https://example.com --output ./design
+node dist/cli/index.js https://example.com --format all --output ./design-all
 ```
 
 The source-built MCP entry point is `node dist/mcp/server.js`; use that command when configuring an MCP-compatible
 client. The shorter `imprint` and `imprint-mcp` commands are package bin names and are not installed globally by
 `pnpm build:cli` alone.
 
-CLI extraction and MCP `imprint_extract` both default to `DESIGN.md`. Select `css`, `tailwind`, or `json` only when the
-consumer needs a direct implementation artifact.
+For a host's stdio server configuration, use `node` as the command and the absolute compiled server path as its argument:
+
+```json
+{ "command": "node", "args": ["/absolute/path/to/imprint/dist/mcp/server.js"] }
+```
+
+On Windows, a path such as `D:/projects/imprint/dist/mcp/server.js` works. Place these process settings in the server
+configuration format required by your MCP host.
+
+**URL is the only required extraction parameter.** CLI returns complete `DESIGN.md` content on stdout; MCP
+`imprint_extract` returns that content in its first text block. No file-read step is needed. Progress and diagnostics
+stay outside the artifact (CLI stderr or MCP metadata). `extract <url>` remains an alias for a bare URL.
+
+Neither extraction entry point saves artifacts or reuses persistent sessions by default. Captures and browser runtime
+data are temporary and cleaned after success, failure, handled cancellation, and graceful transport closure. Forced
+termination or a system crash cannot guarantee cleanup. Explicit `--use-session` / `useSession: true` opts into reading
+and updating persistent Imprint session data; this does not implicitly save exports. `--no-session` remains accepted.
+
+**Updating existing scripts:** add `--output .` if a script expects exports in its current directory. Callers that need
+managed session reuse must enable it explicitly; MCP callers that need dark-mode observations must set `darkMode: true`.
+
+| Output choice                                    | Inline content / filename with an explicit save directory                                        |
+| ------------------------------------------------ | ------------------------------------------------------------------------------------------------ |
+| `design.md` (default), alias `markdown`          | Markdown / `DESIGN.md`                                                                           |
+| `css`                                            | CSS variables / `variables.css`                                                                  |
+| `tailwind`                                       | Tailwind v4 `@theme` / `theme.css`                                                               |
+| `json`                                           | Existing DTCG token export / `design-tokens.json`                                                |
+| `scss`                                           | SCSS variables / `variables.scss`                                                                |
+| `evidence`, `profile`, `components`, `visual-qa` | `design-evidence.json`, `design-profile.json`, `component-specs.json`, `visual-qa.json`          |
+| `html`                                           | Printable HTML / `style-guide.html`; legacy `pdf` is an HTML alias, not a PDF renderer           |
+| `all`                                            | JSON `{ artifacts: [{ format, filename, mimeType, content }] }`, or all ten artifacts when saved |
+
+`component-specs` remains an alias for `components`. Legacy CLI `--json-stdout` (including its old `--format json`
+combination) and MCP `format: "tokens"` return their existing internal-token payloads, not DTCG. They are inline-only and
+reject a save destination; use standard `json` for saved token exports.
+
+**Saving is explicit:** CLI `--output <directory>` saves only selected artifacts and leaves stdout empty. Relative paths
+use the invocation working directory. MCP `outputDir` must be an absolute path on the server machine; its response is
+a save manifest with absolute file paths in both `structuredContent` and a JSON text block. Existing selected files
+cause an error unless `--overwrite` / `overwrite: true` is supplied; unrelated files are preserved. Referenced captures
+are saved as relative assets when needed, so the output directory remains portable. Inline evidence preserves capture
+metadata but marks discarded local files as `fileAvailability: "not-retained"` with an empty path.
+
+Overwrite applies only to existing regular files, and requires an explicit output directory. Saving is not transactional:
+a failed write may leave partial artifacts; the error lists paths that may have been written. Successful delivery is
+reported only after temporary-data cleanup succeeds. MCP tool failures return `isError: true` and an error text block.
+
+Both extraction entry points default to desktop viewport, up to eight pages, automatic discovery, dark-mode extraction
+off, and anonymous sessions. Optional CLI `--viewport`, `--pages`, `--discovery`, `--dark-mode`, `--browser-path` map to
+MCP `viewport`, `maxPages`, `discovery`, `darkMode`, `browserPath`; `viewport: "all"` selects desktop/tablet/mobile.
+The page limit must be an integer from 1 to 20. `--use-session` conflicts with `--no-session`; `--quiet` suppresses
+ordinary CLI progress but preserves errors and material diagnostics. Invalid formats, types, ranges, and conflicting
+options fail before analysis. Example MCP arguments:
+
+```json
+{ "url": "https://example.com" }
+```
+
+Add `"format": "css"` to consume CSS directly, or `"format": "all"` and an absolute `outputDir` to save all artifacts.
 
 The CLI and MCP server do not require an Imprint-hosted service, a running Desktop application, a model provider, or an
 API key. Both run locally. Source builds currently require Node.js 20.19 or newer and an installed Chrome, Edge, or
 compatible Chromium executable; analyzing a public URL also requires normal network access to that website. A future
 package install will provide the JavaScript dependencies, but it will not bundle the browser.
 
-MCP additionally requires an MCP-compatible coding agent or client. That client starts `imprint-mcp` as a local process
+MCP additionally requires an MCP-compatible coding agent or client. That client starts the compiled server with `node`
+as a local process
 and communicates with it over stdin/stdout. The word “server” refers to that local tool process; no remote deployment or
 Imprint-operated server is required.
 
 The CLI `doctor` command verifies Node.js, the operating system, browser executable access, and an actual headless launch without
 navigating to a website. `--browser-path` selects an explicit Chrome, Edge, or Chromium executable for both diagnostics
 and extraction; an invalid explicit path fails instead of silently falling back. The CLI uses stable exit codes: `0`
-success, `2` invalid command/options, `3` missing or unusable runtime dependency, `4` capture/export failure, and `130`
+success, `2` invalid command/options, `3` missing or unusable runtime dependency, `4` capture/export/cleanup failure, and `130`
 SIGINT cancellation. Doctor reports schema `1` JSON with `--json`; it diagnoses the environment but does not install a
 browser.
 
 The MCP server exposes deterministic `imprint_extract` and `imprint_compare` tools. It requires no provider credentials.
 `imprint_compare` accepts either two URLs or two previously exported Design Profiles and supports token or deterministic
-language-depth comparison. Its stdio transport writes one newline-delimited JSON-RPC message per stdout line, keeps logs
+language-depth comparison. URL comparison retains its existing persistent capture/session behavior; the no-retained-files
+default above applies to extraction. Its stdio transport writes one newline-delimited JSON-RPC message per stdout line, keeps logs
 on stderr, and supports legacy lifecycle negotiation through protocol version `2025-11-25`. The compiled server is
 covered by an official `@modelcontextprotocol/sdk` client contract test.
 

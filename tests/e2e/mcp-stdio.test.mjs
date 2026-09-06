@@ -5,7 +5,18 @@ import assert from 'node:assert/strict'
 import { spawn } from 'node:child_process'
 import http from 'node:http'
 import path from 'node:path'
-import test from 'node:test'
+import test, { after } from 'node:test'
+
+import { extractionSandbox } from './helpers/extraction-harness.mjs'
+
+const sandbox = extractionSandbox(true)
+after(() => {
+  try {
+    sandbox.verify()
+  } finally {
+    sandbox.cleanup()
+  }
+})
 
 const serverPath = path.resolve('dist/mcp/server.js')
 
@@ -13,7 +24,8 @@ test('official MCP client initializes the stdio server and lists tools', { timeo
   const transport = new StdioClientTransport({
     command: process.execPath,
     args: [serverPath],
-    cwd: process.cwd(),
+    cwd: sandbox.cwd,
+    env: sandbox.env,
     stderr: 'pipe',
   })
   const client = new Client({ name: 'imprint-contract-test', version: '1.0.0' })
@@ -68,7 +80,8 @@ test(
     const transport = new StdioClientTransport({
       command: process.execPath,
       args: [serverPath],
-      cwd: process.cwd(),
+      cwd: sandbox.cwd,
+      env: sandbox.env,
       stderr: 'pipe',
     })
     const client = new Client({ name: 'imprint-extraction-test', version: '1.0.0' })
@@ -106,7 +119,11 @@ test(
   'stdio uses one JSON-RPC message per line and returns standard protocol errors',
   { timeout: 15_000 },
   async (t) => {
-    const child = spawn(process.execPath, [serverPath], { stdio: ['pipe', 'pipe', 'pipe'] })
+    const child = spawn(process.execPath, [serverPath], {
+      stdio: ['pipe', 'pipe', 'pipe'],
+      env: sandbox.env,
+      cwd: sandbox.cwd,
+    })
     t.after(() => {
       if (!child.killed) child.kill('SIGTERM')
     })
@@ -224,5 +241,9 @@ test(
       child.once('close', (code, signal) => resolve({ code, signal }))
     })
     assert.deepEqual(exit, { code: 0, signal: null })
+    assert.ok(
+      lines.every((line) => JSON.parse(line).id !== 10),
+      'cancelled request must not send a late success',
+    )
   },
 )

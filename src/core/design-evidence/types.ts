@@ -24,6 +24,8 @@ export interface EvidenceImage {
   id: string
   kind: 'overview' | 'viewport-crop' | 'region-crop'
   path: string
+  /** Automation can retain observation metadata while discarding the temporary capture file. */
+  fileAvailability?: 'not-retained'
   width: number
   height: number
   /** Wall-clock time after the encoded pixels were written. */

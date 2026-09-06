@@ -1,16 +1,13 @@
 #!/usr/bin/env node
 
-import fs from 'node:fs'
-import path from 'node:path'
-
-import { buildAnalysisArtifacts } from '../core/analysis-artifacts.js'
-import { BrowserExecutableError, NoUsableCapturesError, analyze } from '../core/analyzer/index.js'
+import { BrowserExecutableError, NoUsableCapturesError } from '../core/analyzer/index.js'
 import {
   formatExtractionIssueDiagnosticsForDisplay,
   sanitizeDiagnosticTextForDisplay,
   sanitizeUrlForPersistence,
 } from '../core/analyzer/url-privacy.js'
-import { getDefaultDataDir } from '../core/data-dir.js'
+import { runExtraction } from '../core/extraction-delivery.js'
+import { ExtractionRequestError } from '../core/extraction-request.js'
 import { coreT, coreTranslator } from '../core/i18n/index.js'
 import {
   CLI_EXIT_CODES,
@@ -22,7 +19,6 @@ import {
   parseCliCommand,
   runDoctor,
 } from './command.js'
-import { resolveCliExportFormats } from './export-formats.js'
 
 const cliT = coreTranslator('en', 'cli')
 const diagnosticInputUrls = process.argv.slice(2).filter((value) => /^[a-z][a-z\d+.-]*:\/\//i.test(value))
@@ -58,167 +54,40 @@ async function main(): Promise<number> {
   }
 
   const { url, options } = command
-  const dataDir = getDefaultDataDir()
   const analysisController = new AbortController()
-  let cancellationDeadline: ReturnType<typeof setTimeout> | undefined
   const cancelAnalysis = () => {
     process.exitCode = CLI_EXIT_CODES.cancelled
-    process.stderr.write(`${cliT('errors.prefix')}: ${cliT('errors.cancelled')}\n`)
-    cancellationDeadline = setTimeout(() => {}, 10_000)
+    process.stderr.write(cliT('errors.cancelled') + '\n')
     analysisController.abort(new CliCancellationError())
   }
   process.once('SIGINT', cancelAnalysis)
-
-  log(`\n  Imprint — Analyzing ${sanitizeUrlForPersistence(url)}\n`, options.quiet)
-
-  let result: Awaited<ReturnType<typeof analyze>>
   try {
-    result = await analyze(
-      url,
+    log(cliT('analyzing', { url: sanitizeUrlForPersistence(url) }), options.quiet)
+    const delivery = await runExtraction(
+      { url, options },
       {
-        viewports: options.viewports,
-        useSession: options.useSession,
-        extractDarkMode: options.darkMode,
-        maxPages: options.maxPages,
-        pageDiscovery: options.pageDiscovery,
-        browserPath: options.browserPath,
-        dataDir,
         signal: analysisController.signal,
-      },
-      (progress) => {
-        log(`  [${progress.percent}%] ${progress.step}`, options.quiet)
+        onProgress: (progress) => log('[' + progress.percent + '%] ' + progress.step, options.quiet),
+        onDiagnostic: (message) => process.stderr.write(message + '\n'),
       },
     )
+    for (const warning of delivery.warnings) process.stderr.write(warning + '\n')
+    if (delivery.saved) {
+      for (const artifact of [...delivery.saved.artifacts, ...delivery.saved.assets]) {
+        log(cliT('saved', { path: artifact.path }), options.quiet)
+      }
+    } else {
+      process.stdout.write(delivery.text)
+    }
+    log(cliT('done'), options.quiet)
+    return CLI_EXIT_CODES.success
   } finally {
     process.removeListener('SIGINT', cancelAnalysis)
-    if (cancellationDeadline) clearTimeout(cancellationDeadline)
   }
-  const artifacts = buildAnalysisArtifacts(result, { sourceUrl: url, language: 'en' })
-  const finalTiming = result.timing
-
-  // JSON stdout mode — pipe-friendly
-  if (options.jsonStdout) {
-    process.stdout.write(
-      JSON.stringify(
-        artifacts.darkMode?.darkTokens
-          ? {
-              ...artifacts.tokens,
-              darkMode: {
-                method: artifacts.darkMode.method,
-                tokens: artifacts.darkMode.darkTokens,
-              },
-            }
-          : artifacts.tokens,
-        null,
-        2,
-      ),
-    )
-    return CLI_EXIT_CODES.success
-  }
-
-  // Determine output directory
-  const outputDir = path.resolve(options.output)
-  if (!fs.existsSync(outputDir)) {
-    fs.mkdirSync(outputDir, { recursive: true })
-  }
-
-  const formats = resolveCliExportFormats(options.format, {
-    hasProfile: true,
-  })
-
-  for (const format of formats) {
-    let filename: string
-    let content: string
-
-    switch (format) {
-      case 'design.md':
-      case 'markdown':
-        filename = 'DESIGN.md'
-        content = artifacts.designDoc
-        break
-      case 'tailwind':
-        filename = 'theme.css'
-        content = artifacts.tailwindTheme
-        break
-      case 'css':
-        filename = 'variables.css'
-        content = artifacts.cssVariables
-        break
-      case 'scss':
-        filename = 'variables.scss'
-        content = artifacts.scssVariables
-        break
-      case 'json':
-        filename = 'design-tokens.json'
-        content = artifacts.dtcgJson
-        break
-      case 'evidence':
-        filename = 'design-evidence.json'
-        content = artifacts.evidenceJson
-        break
-      case 'profile':
-        filename = 'design-profile.json'
-        content = artifacts.profileJson
-        break
-      case 'components':
-        filename = 'component-specs.json'
-        content = artifacts.componentSpecsJson
-        break
-      case 'visual-qa':
-        filename = 'visual-qa.json'
-        content = artifacts.visualQaJson
-        break
-      case 'pdf':
-        filename = 'style-guide.html'
-        content = artifacts.pdfHtml
-        break
-      default:
-        log(`  Unknown format: ${format}`, options.quiet)
-        continue
-    }
-
-    const filepath = path.join(outputDir, filename)
-    fs.writeFileSync(filepath, content, 'utf-8')
-    log(`  ✓ ${filepath}`, options.quiet)
-  }
-
-  log(`\n  Done in ${(result.duration / 1000).toFixed(1)}s\n`, options.quiet)
-  if (result.completion.reason === 'user-finished') {
-    log(`  ${cliT('completion.userFinished', { pages: result.pageCoverage.analyzed })}`, options.quiet)
-  }
-  log(
-    `  Timing: total=${finalTiming.totalMs}ms browser=${finalTiming.browserMs || 0}ms preparation=${finalTiming.preparationMs || 0}ms health=${finalTiming.healthGateMs || 0}ms extraction=${finalTiming.extractionMs || 0}ms images=${finalTiming.imageCount}`,
-    options.quiet,
-  )
-  return CLI_EXIT_CODES.success
 }
 
 function printUsage() {
-  process.stdout.write(`
-  Imprint — Extract design systems from websites
-
-  Usage:
-    imprint extract <url> [options]
-    ${cliT('usage.doctor')}
-
-  Options:
-    --format <type>     Output: design.md | tailwind | css | scss | json | evidence | profile | components | visual-qa | pdf | all (default: design.md)
-    --output <path>     Output directory (default: current directory)
-    --viewport <size>   Viewport: desktop | tablet | mobile | all (default: desktop)
-    --dark-mode         Also extract dark mode theme
-    --pages <count>     Stop after this many pages; 1-20 (default: 8)
-    --discovery <mode>  Page discovery: auto | links | sitemap (default: auto)
-    ${cliT('usage.browserPath')}
-    --no-session        Don't reuse Imprint's saved browser session
-    --json-stdout       Output token JSON to stdout (pipe-friendly)
-    --quiet             Suppress progress output
-  Examples:
-    imprint extract https://vercel.com
-    imprint extract https://github.com --format design.md --output ./design/
-    imprint extract https://stripe.com --format json --json-stdout | jq .colors
-    imprint extract https://example.com --viewport all --format profile
-
-`)
+  process.stdout.write(cliT('usage.full') + '\n')
 }
 
 const usageErrorKeys: Record<CliUsageErrorCode, string> = {
@@ -233,6 +102,7 @@ const usageErrorKeys: Record<CliUsageErrorCode, string> = {
   'missing-option-value': 'errors.missingOptionValue',
   'unknown-option': 'errors.unknownOption',
   'unexpected-argument': 'errors.unexpectedArgument',
+  'conflicting-options': 'errors.conflictingOptions',
 }
 
 main()
@@ -245,6 +115,9 @@ main()
     if (error instanceof CliUsageError) {
       exitCode = CLI_EXIT_CODES.usage
       message = cliT(usageErrorKeys[error.code], { option: error.detail, value: error.detail })
+    } else if (error instanceof ExtractionRequestError) {
+      exitCode = CLI_EXIT_CODES.usage
+      message = error.message
     } else if (error instanceof BrowserExecutableError) {
       exitCode = CLI_EXIT_CODES.environment
       message = cliT(error.code === 'browser-not-found' ? 'errors.browserNotFound' : 'errors.invalidBrowserPath', {

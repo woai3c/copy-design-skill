@@ -166,31 +166,92 @@ Imprint 不包含模型厂商、API Key 设置或 Agent CLI 执行路径。外�
 pnpm build:cli
 node dist/cli/index.js doctor
 node dist/cli/index.js doctor --browser-path "/path/to/chrome" --json
-node dist/cli/index.js extract https://example.com --pages 8
-node dist/cli/index.js extract https://example.com --format css
-node dist/cli/index.js extract https://example.com --format tailwind
-node dist/cli/index.js extract https://example.com --format json
+node dist/cli/index.js https://example.com
+node dist/cli/index.js https://example.com --format css
+node dist/cli/index.js https://example.com --format tailwind
+node dist/cli/index.js https://example.com --format json
+node dist/cli/index.js https://example.com --format all
+node dist/cli/index.js https://example.com --output ./design
+node dist/cli/index.js https://example.com --format all --output ./design-all
 ```
 
 从源码构建的 MCP 入口是 `node dist/mcp/server.js`，配置支持 MCP 的客户端时应使用该命令。`imprint` 和
 `imprint-mcp` 是软件包安装后的 bin 名称，仅执行 `pnpm build:cli` 不会将它们安装为全局命令。
 
-CLI 提取与 MCP `imprint_extract` 都默认返回 `DESIGN.md`；只有下游需要直接实现产物时，才选择 `css`、
-`tailwind` 或 `json`。
+配置宿主的 stdio 服务时，将命令设为 `node`，参数设为编译后服务文件的绝对路径：
+
+```json
+{ "command": "node", "args": ["/absolute/path/to/imprint/dist/mcp/server.js"] }
+```
+
+Windows 可使用 `D:/projects/imprint/dist/mcp/server.js` 这样的路径。请将这些进程设置填入所用 MCP 宿主要求的服务配置结构。
+
+**URL 是唯一必填的提取参数。** CLI 在 stdout 直接输出完整 `DESIGN.md` 正文，MCP `imprint_extract`
+在首个文本块中返回正文，不需要再读取文件。进度和诊断放在产物之外（CLI stderr 或 MCP 元数据）。
+`extract <url>` 仍可作为直接传 URL 的等价调用方式。
+
+两个提取入口默认都不保存产物，也不复用持久会话。截图和浏览器运行数据只临时使用，
+在成功、失败、已处理的取消和正常连接关闭后清理；强制终止或系统崩溃不能保证清理。
+显式 `--use-session` / `useSession: true` 才允许读取和更新 Imprint 持久会话数据，
+该选项不会隐式保存导出文件。继续接受 `--no-session`。
+
+**更新已有脚本：** 如果脚本依赖当前目录中的导出文件，请增加 `--output .`。
+需要复用托管会话时必须显式启用；MCP 调用需要暗色模式观察时，请设置 `darkMode: true`。
+
+| 格式选择                                         | 直接返回的内容 / 显式保存时的文件名                                                         |
+| ------------------------------------------------ | ------------------------------------------------------------------------------------------- |
+| `design.md`（默认），别名 `markdown`             | Markdown / `DESIGN.md`                                                                      |
+| `css`                                            | CSS 变量 / `variables.css`                                                                  |
+| `tailwind`                                       | Tailwind v4 `@theme` / `theme.css`                                                          |
+| `json`                                           | 现有 DTCG Token 导出 / `design-tokens.json`                                                 |
+| `scss`                                           | SCSS 变量 / `variables.scss`                                                                |
+| `evidence`、`profile`、`components`、`visual-qa` | `design-evidence.json`、`design-profile.json`、`component-specs.json`、`visual-qa.json`     |
+| `html`                                           | 可打印 HTML / `style-guide.html`；旧版 `pdf` 是 HTML 别名，并非 PDF 渲染器                  |
+| `all`                                            | JSON `{ artifacts: [{ format, filename, mimeType, content }] }`，指定目录则保存全部十种产物 |
+
+保留 `component-specs` 作为 `components` 的别名。旧版 CLI `--json-stdout`（包括已有的 `--format json`
+组合）和 MCP `format: "tokens"` 继续返回各自的内部 Token 结构，而非 DTCG。
+这两个兼容入口仅直接返回内容，与保存目录同时使用时报错；保存 Token 导出请使用标准 `json` 格式。
+
+**只有显式指定目录才保存：** CLI `--output <目录>` 只保存所选产物，stdout 保持为空，
+相对路径以调用时的工作目录为基准。MCP `outputDir` 必须是服务进程所在机器上的绝对路径；
+响应在 `structuredContent` 和 JSON 文本块中返回包含绝对文件路径的保存清单。
+目标文件已存在时默认报错，只有 `--overwrite` / `overwrite: true` 才覆盖所选文件，无关文件保持不变。
+产物引用的截图按需保存为相对路径资源，便于移动整个目录。
+直接返回的证据保留截图元数据，但将已丢弃的本地文件标记为 `fileAvailability: "not-retained"`，路径为空。
+
+覆盖选项仅适用于已有的普通文件，且必须显式提供输出目录。保存操作不具备事务性：
+写入失败可能留下不完整产物，错误信息会列出可能已写入的路径。只有临时数据清理成功后才报告交付成功。
+MCP 工具执行失败时返回 `isError: true` 和错误文本块。
+
+两个提取入口默认使用 desktop 视口、最多八页、自动发现、关闭暗色提取和匿名会话。
+可选 CLI 参数 `--viewport`、`--pages`、`--discovery`、`--dark-mode`、`--browser-path`
+分别对应 MCP `viewport`、`maxPages`、`discovery`、`darkMode`、`browserPath`；
+`viewport: "all"` 选择 desktop/tablet/mobile。页面数量上限必须是 1 到 20 的整数。
+`--use-session` 与 `--no-session` 冲突；`--quiet` 隐藏普通 CLI 进度，但仍保留错误和重要诊断。
+错误格式、类型、范围和冲突参数会在分析前被拒绝。
+最简 MCP 参数示例：
+
+```json
+{ "url": "https://example.com" }
+```
+
+增加 `"format": "css"` 可直接消费 CSS，增加 `"format": "all"` 和绝对路径 `outputDir` 可保存全部产物。
 
 CLI 与 MCP 不依赖 Imprint 托管服务、正在运行的 Desktop 应用、模型厂商或 API Key，二者都在用户电脑本地运行。
 当前从源码构建时仍需要 Node.js 20.19 或更高版本，以及本机已安装的 Chrome、Edge 或兼容的 Chromium；分析公网
 URL 时还需要能够正常访问目标网站。未来的软件包会安装所需的 JavaScript 依赖，但不会捆绑浏览器。
 
-MCP 还需要支持 MCP 的 Coding Agent 或客户端。客户端会在本地启动 `imprint-mcp` 进程，并通过 stdin/stdout 与其
+MCP 还需要支持 MCP 的 Coding Agent 或客户端。客户端会使用 `node` 在本地启动编译后的服务，并通过 stdin/stdout 与其
 通信。这里的“服务器”只是本地工具进程，不需要远程部署，也不需要由 Imprint 运营服务器。
 
 CLI 的 `doctor` 命令会检查 Node.js、操作系统、浏览器可执行文件，并实际启动一次无页面导航的 headless 浏览器。
 `--browser-path` 可以明确指定 Chrome、Edge 或 Chromium；无效的显式路径会直接失败，不会静默回退。CLI 使用稳定退出码：
-`0` 表示成功，`2` 表示命令或参数错误，`3` 表示运行环境依赖缺失或不可用，`4` 表示捕获或导出失败，`130` 表示 SIGINT 取消。
+`0` 表示成功，`2` 表示命令或参数错误，`3` 表示运行环境依赖缺失或不可用，`4` 表示捕获、导出或清理失败，`130` 表示 SIGINT 取消。
 
 MCP 服务器提供确定性的 `imprint_extract` 与 `imprint_compare` 工具，不需要任何厂商凭据。`imprint_compare` 可以接收
 两个 URL 或两个已经导出的 Design Profile，并按 token 或确定性设计语言进行比较。
+URL 比较保留现有的截图和会话持久化行为；上述默认不保留文件的约定适用于提取。
 
 ## 技术栈
 

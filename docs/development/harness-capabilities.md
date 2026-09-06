@@ -2,7 +2,9 @@
 
 ## Scope and evidence boundary
 
-This report covers the Imprint repository and the local macOS Codex session that prepared these workflow changes.
+This report originally covered the Imprint repository and the local macOS Codex session that prepared these workflow changes.
+The dated Windows source-entrypoint update below has its own candidate and exclusions; it does not extend the original
+macOS runtime evidence or establish release readiness.
 The starting base was `e23833f35e8827e64285c204b49c58664d23bb34` with seven pre-existing analyzer/navigation/page-health
 source and test edits. During this task, those edits were committed outside this harness work as
 `d15f07473a50eca9f823c3c0054fe09fd85d1803`. Their before/after SHA-256 hashes match. Local command evidence covers that
@@ -43,6 +45,23 @@ These statuses do not describe task success. Runtime/tool availability in this s
 | Continuous Knowledge Capture                        | `PARTIAL`        | [Knowledge Promotion Gate](workflow.md#promote-only-confirmed-knowledge) owns provenance, confirmed adoption, smallest-owner routing and stale-rule removal. Current CI omission was verified from definitions and repaired; long-term reuse is unmeasured.                                                                | Maintainer confirms meaning; keep unconfirmed candidates in task evidence. Reevaluate after contradictory evidence or ownership changes.                                        |
 | Automatic post-merge knowledge audit                | `NOT CONFIGURED` | No merge-triggered collector, headless Agent/model path or knowledge-PR workflow is configured in the repository.                                                                                                                                                                                                          | Capture confirmed knowledge during work; late lessons use a separate human-reviewed change. Optional automation needs an explicit owner/provider/cost decision.                 |
 | Hosted service observability and staging            | `NOT APPLICABLE` | Public delivery is a local Desktop app; CLI/MCP are local source entrypoints, not an Imprint-operated service.                                                                                                                                                                                                             | Use local runtime evidence and GitHub release job/assets for applicable diagnosis. Reassess only if an operated service is introduced.                                          |
+
+## Windows source-entrypoint update (2026-09-06)
+
+These scoped observations supplement the capability rows above. Verification candidate: `7333ce6` plus the CLI/MCP direct
+output implementation, on Windows x64 (10.0.19045), Node 22.14.0, pnpm 10.7.1, installed Chrome 152.0.7977.76, and the
+official MCP SDK client 1.30.0. Verification preceded the authorized local commit; resolve the delivered revision from
+the commit containing this update. Human host acceptance remains pending, and no push or release is established here.
+
+| Capability / Windows scope         | Status    | Observed evidence and remaining boundary                                                                                                                                                                                                                                                                                                                                     |
+| ---------------------------------- | --------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Local source checks                | `READY`   | Typecheck, scoped non-mutating ESLint/Prettier, all 955 unit tests, and a fresh CLI/MCP source build passed. This does not establish native Desktop runtime behavior.                                                                                                                                                                                                        |
+| CLI and local stdio MCP extraction | `PARTIAL` | Real isolated CLI and official-client tests exercise URL-only Markdown, all ten formats, inline/saved results, parameter errors, overwrite, portable captures, explicit sessions, and MCP cancellation/closure. Existing profile/URL comparison calls also pass. Windows graceful CLI SIGINT and a human MCP host remain unverified; no installable distribution is claimed. |
+| Annotated browser evidence         | `PARTIAL` | 38 cases passed; `portfolio-gallery` failed its responsive `reflow`/`mixed` assertion. The same isolated case fails on untouched base `7333ce6`. This is a recorded existing failure, not a passing suite; recheck after analyzer, browser, fixture, or oracle changes.                                                                                                      |
+
+The relevant retained task logs and source-build samples are identified in the implementing conversation. They are local
+evidence, not portable repository prerequisites. Full Desktop E2E remains at the existing PR/tag boundary; the maintainer
+owns human acceptance and disposition of the reproduced pre-existing browser regression.
 
 ## Remote verification and human setup
 

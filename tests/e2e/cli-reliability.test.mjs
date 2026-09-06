@@ -2,9 +2,19 @@ import assert from 'node:assert/strict'
 import { spawn, spawnSync } from 'node:child_process'
 import http from 'node:http'
 import path from 'node:path'
-import test from 'node:test'
+import test, { after } from 'node:test'
 
 import { findBrowser } from '../../dist/core/analyzer/browser-finder.js'
+import { extractionSandbox } from './helpers/extraction-harness.mjs'
+
+const sandbox = extractionSandbox(true)
+after(() => {
+  try {
+    sandbox.verify()
+  } finally {
+    sandbox.cleanup()
+  }
+})
 
 const cliPath = path.resolve('dist/cli/index.js')
 const browserPath = findBrowser()
@@ -29,6 +39,8 @@ function collectChild(child) {
 test('CLI doctor launches the configured browser and returns structured diagnostics', { skip: !browserPath }, () => {
   const result = spawnSync(process.execPath, [cliPath, 'doctor', '--browser-path', browserPath, '--json'], {
     encoding: 'utf8',
+    env: sandbox.env,
+    cwd: sandbox.cwd,
   })
 
   assert.equal(result.status, 0, result.stderr)
@@ -46,6 +58,8 @@ test('CLI doctor returns the environment exit code for an invalid browser path',
     [cliPath, 'doctor', '--browser-path', '/imprint/missing/browser', '--json'],
     {
       encoding: 'utf8',
+      env: sandbox.env,
+      cwd: sandbox.cwd,
     },
   )
 
@@ -60,10 +74,12 @@ test('CLI rejects malformed integer options with the usage exit code', () => {
   for (const value of ['2x', '21']) {
     const result = spawnSync(process.execPath, [cliPath, 'extract', 'https://example.test', '--pages', value], {
       encoding: 'utf8',
+      env: sandbox.env,
+      cwd: sandbox.cwd,
     })
 
     assert.equal(result.status, 2)
-    assert.match(result.stderr, /--pages must be an integer from 1 to 20/)
+    assert.match(result.stderr, /(?:--pages|--pages \/ maxPages) must be an integer from 1 to 20/)
   }
 })
 
@@ -101,7 +117,7 @@ test('CLI keeps JSON stdout parseable during a real extraction', { skip: !browse
         '--json-stdout',
         '--quiet',
       ],
-      { stdio: ['ignore', 'pipe', 'pipe'] },
+      { stdio: ['ignore', 'pipe', 'pipe'], env: sandbox.env, cwd: sandbox.cwd },
     ),
   )
 
@@ -147,7 +163,7 @@ test(
           '--json-stdout',
           '--quiet',
         ],
-        { stdio: ['ignore', 'pipe', 'pipe'] },
+        { stdio: ['ignore', 'pipe', 'pipe'], env: sandbox.env, cwd: sandbox.cwd },
       ),
     )
 
@@ -157,29 +173,39 @@ test(
   },
 )
 
-test('CLI maps SIGINT to cancellation exit code 130', { skip: !browserPath, timeout: 20_000 }, async () => {
-  const child = spawn(
-    process.execPath,
-    [cliPath, 'extract', 'http://127.0.0.1:9', '--no-session', '--browser-path', browserPath, '--pages', '1'],
-    { stdio: ['ignore', 'ignore', 'pipe'] },
-  )
-  let stderr = ''
-  let signalled = false
-  child.stderr.setEncoding('utf8')
-  child.stderr.on('data', (chunk) => {
-    stderr += chunk
-    if (!signalled && stderr.includes('[7%]')) {
-      signalled = true
-      child.kill('SIGINT')
-    }
-  })
+test(
+  'CLI maps SIGINT to cancellation exit code 130',
+  {
+    skip:
+      process.platform === 'win32'
+        ? 'Windows child.kill does not deliver graceful SIGINT; shared cancellation and MCP cleanup are tested separately'
+        : !browserPath,
+    timeout: 20_000,
+  },
+  async () => {
+    const child = spawn(
+      process.execPath,
+      [cliPath, 'extract', 'http://127.0.0.1:9', '--no-session', '--browser-path', browserPath, '--pages', '1'],
+      { stdio: ['ignore', 'ignore', 'pipe'], env: sandbox.env, cwd: sandbox.cwd },
+    )
+    let stderr = ''
+    let signalled = false
+    child.stderr.setEncoding('utf8')
+    child.stderr.on('data', (chunk) => {
+      stderr += chunk
+      if (!signalled && stderr.includes('[7%]')) {
+        signalled = true
+        child.kill('SIGINT')
+      }
+    })
 
-  const exit = await new Promise((resolve, reject) => {
-    child.once('error', reject)
-    child.once('close', (code, signal) => resolve({ code, signal }))
-  })
+    const exit = await new Promise((resolve, reject) => {
+      child.once('error', reject)
+      child.once('close', (code, signal) => resolve({ code, signal }))
+    })
 
-  assert.equal(signalled, true, stderr)
-  assert.deepEqual(exit, { code: 130, signal: null })
-  assert.match(stderr, /Analysis cancelled/)
-})
+    assert.equal(signalled, true, stderr)
+    assert.deepEqual(exit, { code: 130, signal: null })
+    assert.match(stderr, /Analysis cancelled/)
+  },
+)

@@ -38,7 +38,8 @@
       "invalidBrowserPath": "--browser-path is not an accessible executable file: {{path}}",
       "cancelled": "Analysis cancelled.",
       "noUsableCaptures": "No usable page content could be captured. The site may be unavailable, blocked, or still loading.",
-      "runtime": "Analysis failed: {{message}}"
+      "runtime": "Analysis failed: {{message}}",
+      "conflictingOptions": "Conflicting or repeated options: {{value}}"
     },
     "completion": {
       "userFinished": "Finished with the current result and kept {{pages}} completed pages."
@@ -59,8 +60,12 @@
     },
     "usage": {
       "doctor": "imprint doctor [--browser-path <path>] [--json]",
-      "browserPath": "--browser-path <path>  Use this Chrome, Edge, or Chromium executable"
-    }
+      "browserPath": "--browser-path <path>  Use this Chrome, Edge, or Chromium executable",
+      "full": "Imprint - Extract design systems from websites\n\nUsage:\n  imprint <url> [options]\n  imprint extract <url> [options]\n  imprint doctor [--browser-path <path>] [--json]\n\nOnly URL is required. By default, stdout is complete DESIGN.md text; no artifacts, captures, or sessions are retained.\nTemporary browser data is cleaned after success, failure, and handled cancellation. Logs go to stderr.\n\nOptions:\n  --format <type>       design.md | css | tailwind | json | scss | evidence | profile | components | visual-qa | html | all\n                       Default: design.md. all returns one JSON artifact collection without --output.\n                       Aliases: markdown, component-specs, pdf (deprecated printable HTML).\n  --output <directory>  Save selected artifacts here; omit for direct stdout. Saved mode leaves stdout empty.\n  --overwrite           Replace selected existing regular files; requires --output.\n  --viewport <size>     desktop | tablet | mobile | all (default: desktop)\n  --dark-mode           Also observe dark mode (default: off)\n  --pages <count>       Integer 1-20 (default: 8)\n  --discovery <mode>    auto | links | sitemap (default: auto)\n  --browser-path <path> Use this Chrome, Edge, or Chromium executable\n  --use-session         Explicit persistent session reuse; may read/update browser profiles and storage state\n  --no-session          Anonymous temporary session (default); conflicts with --use-session\n  --json-stdout         Legacy internal tokens, NOT DTCG; inline-only, optionally with legacy --format json\n  --quiet               Suppress ordinary progress; errors and material diagnostics remain\n\nExamples:\n  imprint https://example.com\n  imprint https://example.com --format css\n  imprint https://example.com --format json\n  imprint https://example.com --format all --output ./design\n"
+    },
+    "analyzing": "Analyzing {{url}}",
+    "saved": "Saved {{path}}",
+    "done": "Done."
   },
   "mcp": {
     "started": "Imprint MCP Server started (stdio mode)",
@@ -77,6 +82,19 @@
       "noUsableCaptures": "No usable page content could be captured. The site may be unavailable, blocked, or still loading.",
       "toolExecution": "Tool execution failed: {{message}}",
       "internal": "Internal server error"
+    },
+    "extract": {
+      "description": "Extract a website design system. With only URL, returns complete DESIGN.md text without retained files. An explicit outputDir saves selected artifacts.",
+      "url": "HTTP(S) URL to analyze; the only required parameter.",
+      "format": "Artifact format; default design.md. json is DTCG; tokens is the legacy inline-only summary; pdf is a deprecated HTML alias. all returns a JSON artifact collection without a directory.",
+      "outputDir": "Optional absolute directory on this server machine. Omit to return content without saving.",
+      "overwrite": "Replace selected existing regular files; requires outputDir.",
+      "viewport": "Viewport: desktop, tablet, mobile, or all; default desktop.",
+      "useSession": "Explicitly reuse a managed session (default false). Can read and update persistent browser profiles and storage state.",
+      "darkMode": "Also observe dark mode; default false.",
+      "browserPath": "Optional Chrome, Edge, or Chromium executable path.",
+      "maxPages": "Page limit from 1 to 20; default 8.",
+      "discovery": "Page discovery: auto, links, or sitemap; default auto."
     }
   },
   "agentGuide": {
@@ -1222,5 +1240,26 @@
       "mobilePartialNeeded": "The uncaptured mobile viewport and cross-page consistency",
       "mobileObservedNeeded": "Mobile structure on other pages and cross-page consistency"
     }
+  },
+  "extraction": {
+    "errors": {
+      "invalid-url": "Provide exactly one valid HTTP(S) URL.",
+      "invalid-format": "Unsupported export format: {{value}}",
+      "unknown-parameter": "Unknown extraction parameter: {{value}}",
+      "invalid-parameter": "Invalid extraction parameter: {{value}}",
+      "invalid-viewports": "Viewport must be desktop, tablet, mobile, or all: {{value}}",
+      "invalid-page-count": "--pages / maxPages must be an integer from 1 to 20.",
+      "invalid-page-discovery": "Discovery must be auto, links, or sitemap: {{value}}",
+      "invalid-output": "Output must be a non-empty directory path: {{value}}",
+      "absolute-output": "MCP outputDir must be an absolute directory path on the server machine.",
+      "overwrite-output": "Overwrite requires an explicit output directory.",
+      "legacy-output": "Legacy tokens / --json-stdout are inline-only. Use format json to save DTCG tokens.",
+      "legacy-format": "--json-stdout accepts no explicit format or the legacy --format json combination.",
+      "output-conflict": "Output already exists or cannot be replaced: {{value}}. Use overwrite only for existing regular files.",
+      "write-failed": "Export failed: {{value}}. Files that may have been written (possibly incomplete): {{files}}",
+      "cleanup-failed": "Temporary-data cleanup failed; retained workspace: {{value}}"
+    },
+    "pdf-alias": "The deprecated pdf format exports printable HTML (style-guide.html), not a PDF file.",
+    "session-persistence": "Explicit session reuse can read and update persistent Imprint browser profiles and storage state."
   }
 }

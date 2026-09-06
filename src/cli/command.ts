@@ -1,12 +1,7 @@
 import { chromium } from 'playwright-core'
 
-import {
-  AnalysisRequestError,
-  type AnalysisViewport,
-  createAnalysisRequest,
-  findBrowser,
-  validateBrowserExecutablePath,
-} from '../core/analyzer/index.js'
+import { findBrowser, validateBrowserExecutablePath } from '../core/analyzer/index.js'
+import { type ExtractionOptions, createExtractionRequest } from '../core/extraction-request.js'
 
 export const CLI_EXIT_CODES = {
   success: 0,
@@ -28,6 +23,7 @@ export type CliUsageErrorCode =
   | 'missing-option-value'
   | 'unknown-option'
   | 'unexpected-argument'
+  | 'conflicting-options'
 
 export class CliUsageError extends Error {
   constructor(
@@ -46,17 +42,8 @@ export class CliCancellationError extends Error {
   }
 }
 
-export interface CliExtractOptions {
-  format: string
-  output: string
-  viewports: AnalysisViewport[]
-  useSession: boolean
-  darkMode: boolean
+export interface CliExtractOptions extends ExtractionOptions {
   quiet: boolean
-  jsonStdout: boolean
-  maxPages: number
-  pageDiscovery: 'auto' | 'links' | 'sitemap'
-  browserPath?: string
 }
 
 export type CliCommand =
@@ -71,23 +58,16 @@ interface ScannedArgs {
 }
 
 const extractValueOptions = new Set(['--format', '--output', '--viewport', '--pages', '--discovery', '--browser-path'])
-const extractSwitchOptions = new Set(['--no-session', '--dark-mode', '--quiet', '--json-stdout'])
+const extractSwitchOptions = new Set([
+  '--no-session',
+  '--use-session',
+  '--dark-mode',
+  '--quiet',
+  '--json-stdout',
+  '--overwrite',
+])
 const doctorValueOptions = new Set(['--browser-path'])
 const doctorSwitchOptions = new Set(['--json'])
-const exportFormats = new Set([
-  'all',
-  'components',
-  'css',
-  'design.md',
-  'evidence',
-  'json',
-  'markdown',
-  'pdf',
-  'profile',
-  'scss',
-  'tailwind',
-  'visual-qa',
-])
 
 function scanArgs(args: string[], valueOptions: Set<string>, switchOptions: Set<string>): ScannedArgs {
   const values = new Map<string, string>()
@@ -99,6 +79,7 @@ function scanArgs(args: string[], valueOptions: Set<string>, switchOptions: Set<
     if (valueOptions.has(argument)) {
       const value = args[index + 1]
       if (!value || value.startsWith('-')) throw new CliUsageError('missing-option-value', argument)
+      if (values.has(argument)) throw new CliUsageError('conflicting-options', argument)
       values.set(argument, value)
       index += 1
       continue
@@ -112,11 +93,6 @@ function scanArgs(args: string[], valueOptions: Set<string>, switchOptions: Set<
   }
 
   return { values, switches, positionals }
-}
-
-function analysisRequestError(error: unknown): never {
-  if (error instanceof AnalysisRequestError) throw new CliUsageError(error.code)
-  throw error
 }
 
 export function parseCliCommand(args: string[]): CliCommand {
@@ -143,50 +119,28 @@ export function parseCliCommand(args: string[]): CliCommand {
     )
   }
 
-  const viewport = scanned.values.get('--viewport') || 'desktop'
-  if (!['desktop', 'tablet', 'mobile', 'all'].includes(viewport)) {
-    throw new CliUsageError('invalid-viewports', viewport)
-  }
-  const viewports = (viewport === 'all' ? ['desktop', 'tablet', 'mobile'] : [viewport]) as AnalysisViewport[]
-
   const pagesText = scanned.values.get('--pages')
   if (pagesText !== undefined && !/^\d+$/.test(pagesText)) throw new CliUsageError('invalid-page-count', pagesText)
-  const maxPages = pagesText === undefined ? undefined : Number(pagesText)
-  const format = scanned.values.get('--format') || 'design.md'
-  if (!exportFormats.has(format)) throw new CliUsageError('invalid-format', format)
-  const pageDiscovery = scanned.values.get('--discovery') || 'auto'
-  if (!['auto', 'links', 'sitemap'].includes(pageDiscovery)) {
-    throw new CliUsageError('invalid-page-discovery', pageDiscovery)
+  if (scanned.switches.has('--use-session') && scanned.switches.has('--no-session')) {
+    throw new CliUsageError('conflicting-options', '--use-session / --no-session')
   }
-
-  try {
-    const request = createAnalysisRequest({
+  const request = createExtractionRequest(
+    {
       url: scanned.positionals[0],
-      viewports,
-      maxPages,
-      useSession: !scanned.switches.has('--no-session'),
-      extractDarkMode: scanned.switches.has('--dark-mode'),
-      pageDiscovery: pageDiscovery as CliExtractOptions['pageDiscovery'],
-    })
-    return {
-      kind: 'extract',
-      url: request.url,
-      options: {
-        format,
-        output: scanned.values.get('--output') || '.',
-        viewports: request.viewports,
-        useSession: request.authMode !== 'anonymous',
-        darkMode: request.extractDarkMode,
-        quiet: scanned.switches.has('--quiet'),
-        jsonStdout: scanned.switches.has('--json-stdout'),
-        maxPages: request.maxPages,
-        pageDiscovery: request.pageDiscovery,
-        browserPath: scanned.values.get('--browser-path'),
-      },
-    }
-  } catch (error) {
-    analysisRequestError(error)
-  }
+      format: scanned.values.get('--format'),
+      outputDir: scanned.values.get('--output'),
+      overwrite: scanned.switches.has('--overwrite'),
+      viewport: scanned.values.get('--viewport'),
+      maxPages: pagesText === undefined ? undefined : Number(pagesText),
+      discovery: scanned.values.get('--discovery'),
+      useSession: scanned.switches.has('--use-session'),
+      darkMode: scanned.switches.has('--dark-mode'),
+      jsonStdout: scanned.switches.has('--json-stdout'),
+      browserPath: scanned.values.get('--browser-path'),
+    },
+    'cli',
+  )
+  return { kind: 'extract', url: request.url, options: { ...request.options, quiet: scanned.switches.has('--quiet') } }
 }
 
 export interface DoctorCheck {
